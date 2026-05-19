@@ -324,6 +324,135 @@ body {
     cursor: not-allowed;
 }
 
+/* 麦克风按钮 */
+.mic-button {
+    width: 55px;
+    height: 55px;
+    border: 2px solid var(--gray-200);
+    border-radius: var(--border-radius-lg);
+    background: var(--white);
+    color: var(--text-color);
+    font-size: 1.3rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.mic-button:hover:not(:disabled) {
+    border-color: var(--primary-color);
+    transform: scale(1.05);
+}
+
+.mic-button.recording {
+    background: var(--error-color);
+    border-color: var(--error-color);
+    color: var(--white);
+    animation: recordingPulse 1s infinite;
+}
+
+@keyframes recordingPulse {
+    0%, 100% {
+        box-shadow: 0 0 0 0 rgba(244, 67, 54, 0.7);
+    }
+    50% {
+        box-shadow: 0 0 0 10px rgba(244, 67, 54, 0);
+    }
+}
+
+/* 语音控制区域 */
+.voice-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.speaker-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 12px;
+    border: 2px solid var(--gray-200);
+    border-radius: var(--border-radius-md);
+    background: var(--white);
+    color: var(--gray-600);
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.speaker-toggle:hover {
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+}
+
+.speaker-toggle.active {
+    background: var(--primary-color);
+    border-color: var(--primary-color);
+    color: var(--white);
+}
+
+.stop-speech {
+    padding: 8px 12px;
+    border: none;
+    border-radius: var(--border-radius-md);
+    background: var(--accent-color);
+    color: var(--text-color);
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.stop-speech:hover {
+    background: #FFD54F;
+    transform: scale(1.02);
+}
+
+/* 正在播放动画 */
+.message-bubble.playing {
+    position: relative;
+}
+
+.message-bubble.playing::after {
+    content: '';
+    position: absolute;
+    bottom: -5px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 3px;
+}
+
+.playing-waves {
+    display: flex;
+    gap: 3px;
+    align-items: center;
+    padding: 4px 8px;
+    background: var(--gray-100);
+    border-radius: 10px;
+    margin-top: 8px;
+}
+
+.wave-bar {
+    width: 3px;
+    background: var(--primary-color);
+    border-radius: 2px;
+    animation: wave 1s infinite ease-in-out;
+}
+
+.wave-bar:nth-child(1) { height: 10px; animation-delay: 0s; }
+.wave-bar:nth-child(2) { height: 16px; animation-delay: 0.1s; }
+.wave-bar:nth-child(3) { height: 12px; animation-delay: 0.2s; }
+.wave-bar:nth-child(4) { height: 18px; animation-delay: 0.3s; }
+.wave-bar:nth-child(5) { height: 14px; animation-delay: 0.4s; }
+
+@keyframes wave {
+    0%, 100% { transform: scaleY(1); }
+    50% { transform: scaleY(0.5); }
+}
+
 /* 弹窗 */
 .modal-overlay {
     position: fixed;

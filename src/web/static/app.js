@@ -11,8 +11,16 @@ class MathTutorChat {
         this.isConnected = false;
         this.messageHistory = [];
 
+        // 语音相关
+        this.speechRecognition = null;
+        this.isRecording = false;
+        this.autoPlay = true;
+        this.currentUtterance = null;
+
         this.initElements();
         this.initEventListeners();
+        this.initSpeechRecognition();
+        this.loadAutoPlaySetting();
     }
 
     initElements() {
@@ -21,6 +29,11 @@ class MathTutorChat {
         this.messageInput = document.getElementById('message-input');
         this.sendButton = document.getElementById('send-button');
         this.typingIndicator = document.getElementById('typing-indicator');
+
+        // 语音相关
+        this.micButton = document.getElementById('mic-button');
+        this.speakerToggle = document.getElementById('speaker-toggle');
+        this.stopSpeechButton = document.getElementById('stop-speech');
 
         // 状态相关
         this.studentNameDisplay = document.getElementById('student-name');
@@ -53,6 +66,15 @@ class MathTutorChat {
             this.sendButton.disabled = this.messageInput.value.trim() === '';
         });
 
+        // 麦克风按钮
+        this.micButton.addEventListener('click', () => this.toggleRecording());
+
+        // 朗读开关
+        this.speakerToggle.addEventListener('click', () => this.toggleAutoPlay());
+
+        // 停止朗读
+        this.stopSpeechButton.addEventListener('click', () => this.stopSpeaking());
+
         // 弹窗开始按钮
         this.startButton.addEventListener('click', () => this.startSession());
 
@@ -69,6 +91,176 @@ class MathTutorChat {
                 this.ws.close();
             }
         });
+    }
+
+    initSpeechRecognition() {
+        // 检查浏览器是否支持语音识别
+        if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+            console.warn('浏览器不支持语音识别');
+            this.micButton.style.display = 'none';
+            return;
+        }
+
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        this.speechRecognition = new SpeechRecognition();
+
+        this.speechRecognition.continuous = false;
+        this.speechRecognition.interimResults = true;
+        this.speechRecognition.lang = 'zh-CN';
+        this.speechRecognition.maxAlternatives = 1;
+
+        this.speechRecognition.onstart = () => {
+            this.isRecording = true;
+            this.micButton.classList.add('recording');
+            this.micButton.title = '停止录音';
+        };
+
+        this.speechRecognition.onresult = (event) => {
+            let interimTranscript = '';
+            let finalTranscript = '';
+
+            for (let i = event.resultIndex; i < event.results.length; i++) {
+                const transcript = event.results[i][0].transcript;
+                if (event.results[i].isFinal) {
+                    finalTranscript += transcript;
+                } else {
+                    interimTranscript += transcript;
+                }
+            }
+
+            if (finalTranscript) {
+                this.messageInput.value = finalTranscript;
+                this.sendButton.disabled = false;
+            } else if (interimTranscript) {
+                this.messageInput.placeholder = `正在识别: ${interimTranscript}`;
+            }
+        };
+
+        this.speechRecognition.onerror = (event) => {
+            console.error('语音识别错误:', event.error);
+            this.stopRecording();
+            this.messageInput.placeholder = '输入你的答案或问题...';
+
+            if (event.error === 'not-allowed') {
+                this.showError('请允许麦克风权限');
+            }
+        };
+
+        this.speechRecognition.onend = () => {
+            this.stopRecording();
+
+            // 如果识别成功且有内容，自动发送
+            if (this.messageInput.value.trim()) {
+                this.sendMessage();
+            }
+        };
+    }
+
+    toggleRecording() {
+        if (this.isRecording) {
+            this.stopRecording();
+        } else {
+            this.startRecording();
+        }
+    }
+
+    startRecording() {
+        if (!this.speechRecognition) {
+            this.showError('浏览器不支持语音识别');
+            return;
+        }
+
+        try {
+            this.speechRecognition.start();
+            this.messageInput.placeholder = '正在聆听...';
+        } catch (e) {
+            console.error('启动录音失败:', e);
+        }
+    }
+
+    stopRecording() {
+        if (this.speechRecognition && this.isRecording) {
+            this.speechRecognition.stop();
+        }
+        this.isRecording = false;
+        this.micButton.classList.remove('recording');
+        this.micButton.title = '语音输入';
+        this.messageInput.placeholder = '输入你的答案或问题...';
+    }
+
+    toggleAutoPlay() {
+        this.autoPlay = !this.autoPlay;
+        this.speakerToggle.classList.toggle('active', this.autoPlay);
+        localStorage.setItem('autoPlay', this.autoPlay);
+    }
+
+    loadAutoPlaySetting() {
+        const saved = localStorage.getItem('autoPlay');
+        if (saved !== null) {
+            this.autoPlay = saved === 'true';
+            this.speakerToggle.classList.toggle('active', this.autoPlay);
+        }
+    }
+
+    speak(text) {
+        if (!this.autoPlay || !text) return;
+
+        // 停止当前朗读
+        this.stopSpeaking();
+
+        // 检查浏览器是否支持语音合成
+        if (!('speechSynthesis' in window)) {
+            console.warn('浏览器不支持语音合成');
+            return;
+        }
+
+        // 清理文本用于朗读
+        const cleanText = this.cleanTextForSpeech(text);
+        if (!cleanText) return;
+
+        // 获取中文语音
+        const voices = window.speechSynthesis.getVoices();
+        let voice = voices.find(v => v.lang.startsWith('zh'));
+
+        // 如果没有中文语音，使用默认
+        if (!voice && voices.length > 0) {
+            voice = voices[0];
+        }
+
+        this.currentUtterance = new SpeechSynthesisUtterance(cleanText);
+
+        // 设置语音参数
+        if (voice) {
+            this.currentUtterance.voice = voice;
+        }
+        this.currentUtterance.rate = 0.9;  // 语速稍慢，适合小学生
+        this.currentUtterance.pitch = 1.0;
+        this.currentUtterance.volume = 1.0;
+
+        // 显示停止按钮
+        this.stopSpeechButton.style.display = 'block';
+
+        // 事件处理
+        this.currentUtterance.onend = () => {
+            this.stopSpeechButton.style.display = 'none';
+            this.currentUtterance = null;
+        };
+
+        this.currentUtterance.onerror = (e) => {
+            console.error('语音合成错误:', e);
+            this.stopSpeechButton.style.display = 'none';
+            this.currentUtterance = null;
+        };
+
+        window.speechSynthesis.speak(this.currentUtterance);
+    }
+
+    stopSpeaking() {
+        if (this.currentUtterance) {
+            window.speechSynthesis.cancel();
+            this.currentUtterance = null;
+        }
+        this.stopSpeechButton.style.display = 'none';
     }
 
     startSession() {
@@ -157,6 +349,8 @@ class MathTutorChat {
                 this.hideTypingIndicator();
                 this.addMessage('assistant', content);
                 this.saveMessage('assistant', content);
+                // 自动朗读AI回复
+                this.speak(content);
                 break;
 
             case 'status':
@@ -245,6 +439,17 @@ class MathTutorChat {
 
         // 滚动到底部
         this.scrollToBottom();
+    }
+
+    // 清理文本用于语音朗读（移除Markdown符号等）
+    cleanTextForSpeech(text) {
+        return text
+            .replace(/\*\*(.*?)\*\*/g, '$1')  // 移除粗体标记
+            .replace(/\*(.*?)\*/g, '$1')     // 移除斜体标记
+            .replace(/`([^`]+)`/g, '$1')     // 移除代码标记
+            .replace(/\n+/g, '，')            // 换行转为逗号
+            .replace(/\s+/g, ' ')             // 多个空格转为单个空格
+            .trim();
     }
 
     formatMessage(content) {

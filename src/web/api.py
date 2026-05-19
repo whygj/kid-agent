@@ -4,11 +4,13 @@ from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
+from fastapi.responses import Response
 from pydantic import ValidationError
 
 from src.agent.tutor import get_tutor_agent
 from src.memory.student import MasteryLevel
 from src.knowledge.math_g3g5 import get_point_by_id
+from src.voice.tts import TTSError, get_tts_service
 from src.web.models import (
     ChatRequest,
     ChatResponse,
@@ -18,6 +20,7 @@ from src.web.models import (
     StudentStatus,
     KnowledgePointMastery,
     HealthResponse,
+    TTSRequest,
 )
 
 router = APIRouter(prefix="/api", tags=["api"])
@@ -185,3 +188,48 @@ async def get_student_report(student_id: str) -> LearningReport:
 async def health_check() -> HealthResponse:
     """健康检查"""
     return HealthResponse(status="ok", version="2.0.0")
+
+
+@router.post("/voice/tts")
+async def text_to_speech(request: TTSRequest):
+    """文字转语音
+
+    Args:
+        request: TTS请求，包含要转换的文本
+
+    Returns:
+        Response: MP3音频流
+    """
+    try:
+        tts_service = await get_tts_service()
+
+        # 语音类型映射
+        voice_map = {
+            "female": "zh-CN-XiaoxiaoNeural",
+            "male": "zh-CN-YunxiNeural",
+            "child_female": "zh-CN-XiaoyiNeural",
+            "child_male": "zh-CN-YunfengNeural",
+        }
+
+        voice = voice_map.get(request.voice, "zh-CN-XiaoxiaoNeural")
+
+        audio_bytes = await tts_service.synthesize(request.text, voice=voice)
+
+        return Response(
+            content=audio_bytes,
+            media_type="audio/mpeg",
+            headers={
+                "Content-Disposition": "inline; filename=speech.mp3",
+                "Cache-Control": "no-cache",
+            },
+        )
+    except TTSError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"TTS合成失败: {str(e)}",
+        ) from e
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"处理请求失败: {str(e)}",
+        ) from e

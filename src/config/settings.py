@@ -38,10 +38,19 @@ class DBConfig:
 
 
 @dataclass
+class VoiceConfig:
+    """语音配置"""
+    tts_provider: str = "edge"
+    tts_voice: str = "zh-CN-XiaoxiaoNeural"
+    auto_play: bool = True
+
+
+@dataclass
 class Config:
     """全局配置"""
     llm: LLMConfig
     db: DBConfig
+    voice: VoiceConfig
     log_level: str = "INFO"
 
     @classmethod
@@ -92,9 +101,16 @@ class Config:
             path=os.getenv("DB_PATH", str(Path(__file__).parent.parent.parent / "data" / "kid_agent.db"))
         )
 
+        voice_config = VoiceConfig(
+            tts_provider=os.getenv("TTS_PROVIDER", "edge"),
+            tts_voice=os.getenv("TTS_VOICE", "zh-CN-XiaoxiaoNeural"),
+            auto_play=os.getenv("TTS_AUTO_PLAY", "true").lower() == "true",
+        )
+
         config = cls(
             llm=llm_config,
             db=db_config,
+            voice=voice_config,
             log_level=os.getenv("LOG_LEVEL", "INFO"),
         )
 
@@ -148,6 +164,9 @@ class Config:
         logger.info(f"  API Base    : {self.llm.api_base}")
         logger.info(f"  超时时间    : {self.llm.timeout}s")
         logger.info(f"  数据库路径  : {self.db.path}")
+        logger.info(f"  TTS 提供商  : {self.voice.tts_provider}")
+        logger.info(f"  TTS 语音    : {self.voice.tts_voice}")
+        logger.info(f"  TTS 自动播放: {self.voice.auto_play}")
         logger.info(f"  日志级别    : {self.log_level.upper()}")
         logger.info("═════════════════════════════════════════════════════════")
 

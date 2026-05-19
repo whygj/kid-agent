@@ -15,6 +15,7 @@ from src.web.models import (
     SessionStartResponse,
     ChatResponse,
     HealthResponse,
+    TTSRequest,
 )
 
 
@@ -93,6 +94,39 @@ class TestHealthEndpoint:
         assert data["status"] == "ok"
         assert "version" in data
         assert "timestamp" in data
+
+
+class TestTTSEndpoint:
+    """TTS端点测试"""
+
+    def test_tts_endpoint(self, mock_agent):
+        """测试TTS端点"""
+        app = create_app()
+        client = TestClient(app)
+
+        # Mock TTS服务
+        mock_tts = AsyncMock()
+        mock_tts.synthesize = AsyncMock(return_value=b"fake audio data")
+
+        with patch("src.web.api.get_tts_service", AsyncMock(return_value=mock_tts)):
+            response = client.post(
+                "/api/voice/tts",
+                json={"text": "你好", "voice": "female"},
+            )
+            assert response.status_code == 200
+            assert response.headers["content-type"] == "audio/mpeg"
+            assert response.content == b"fake audio data"
+
+    def test_tts_endpoint_invalid_request(self):
+        """测试无效的TTS请求"""
+        app = create_app()
+        client = TestClient(app)
+
+        response = client.post(
+            "/api/voice/tts",
+            json={},  # 缺少 text
+        )
+        assert response.status_code == 422  # Validation error
 
 
 class TestSessionEndpoints:

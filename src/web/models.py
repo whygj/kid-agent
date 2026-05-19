@@ -72,6 +72,12 @@ class HealthResponse(BaseModel):
     timestamp: datetime = Field(default_factory=datetime.now)
 
 
+class TTSRequest(BaseModel):
+    """文字转语音请求"""
+    text: str = Field(..., description="要转换为语音的文本")
+    voice: str = Field(default="female", description="语音类型")
+
+
 class WSMessage(BaseModel):
     """WebSocket消息"""
     type: str = Field(..., description="消息类型: message|status|report|error")
