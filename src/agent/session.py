@@ -44,17 +44,26 @@ class Session:
     messages: list[Message] = field(default_factory=list)
     started_at: datetime = field(default_factory=datetime.now)
     last_active: datetime = field(default_factory=datetime.now)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def add_message(self, role: str, content: str, message_type: MessageType) -> None:
+    def add_message(self, role: str, content: str, message_type: MessageType, metadata: dict | None = None) -> None:
         """添加消息"""
         self.messages.append(
             Message(
                 role=role,
                 content=content,
                 message_type=message_type,
+                metadata=metadata or {},
             )
         )
         self.last_active = datetime.now()
+
+    def get_last_quiz(self) -> dict[str, Any] | None:
+        """获取最近一次题目"""
+        for msg in reversed(self.messages):
+            if msg.metadata.get("quiz"):
+                return msg.metadata["quiz"]
+        return None
 
     def set_state(self, state: SessionState) -> None:
         """设置会话状态"""
@@ -65,7 +74,14 @@ class Session:
         """获取最近消息"""
         return self.messages[-limit:]
 
-    def is_idle(self, timeout_minutes: int = 5) -> bool:
+    def get_last_quiz(self) -> Any | None:
+        """获取最近一次题目"""
+        for msg in reversed(self.messages):
+            if msg.metadata.get("quiz"):
+                return msg.metadata["quiz"]
+        return None
+
+    def is_idle(self, timeout_minutes: int = 30) -> bool:
         """检查是否空闲超时"""
         if self.state == SessionState.IDLE:
             return True

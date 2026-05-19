@@ -38,6 +38,8 @@ class StudentModel:
     streak_days: int = 0
     last_activity: datetime | None = None
     preferences: dict[str, str] = field(default_factory=dict)
+    consecutive_correct: int = 0  # 连续正确次数
+    level: int = 1  # 当前等级
 
     def get_mastery(self, point_id: str) -> MasteryLevel:
         """获取知识点掌握程度"""
@@ -122,17 +124,40 @@ class StudentModel:
         self.mastery[point_id] = new_level
         return new_level
 
-    def add_record(self, record: QuizRecord) -> None:
-        """添加答题记录"""
+    def add_record(self, record: QuizRecord) -> tuple[int, int, str]:
+        """添加答题记录，返回 (xp_gain, new_level, level_up_message)"""
         self.history.append(record)
         self.last_activity = datetime.now()
 
         # 更新掌握程度
         self.update_mastery(record.point_id, record.is_correct)
 
-        # 更新经验值
-        xp_gain = 10 if record.is_correct else 3
+        # 计算经验值（连对加成）
+        old_level = self.level
+        if record.is_correct:
+            self.consecutive_correct += 1
+            if self.consecutive_correct >= 5:
+                xp_gain = 20
+            elif self.consecutive_correct >= 3:
+                xp_gain = 15
+            else:
+                xp_gain = 10
+        else:
+            self.consecutive_correct = 0
+            xp_gain = 3  # 答错也有鼓励分
+
         self.total_xp += xp_gain
+
+        # 计算等级（每100 XP升一级）
+        new_level = 1 + self.total_xp // 100
+        self.level = new_level
+
+        # 生成升级消息
+        level_up_message = ""
+        if new_level > old_level:
+            level_up_message = f"🎉 恭喜你升到了{new_level}级！太棒了！"
+
+        return xp_gain, new_level, level_up_message
 
     def get_weak_points(self) -> list[str]:
         """获取薄弱知识点列表"""

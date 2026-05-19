@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import DateTime, Integer, String, Text, create_engine, func, select
+from sqlalchemy import DateTime, Integer, String, Text, create_engine, func, select, Index
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -43,6 +43,21 @@ class QuizHistoryORM(Base):
     feedback: Mapped[str] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, index=True)
     difficulty: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class MasteryORM(Base):
+    """掌握程度表"""
+    __tablename__ = "mastery"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    student_id: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    point_id: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    mastery_level: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    __table_args__ = (
+        Index("idx_student_point", "student_id", "point_id", unique=True),
+    )
 
 
 class MemoryStore:
@@ -236,6 +251,49 @@ class MemoryStore:
                 "point_stats": points,
                 "last_activity": recent,
             }
+
+    async def get_mastery(self, student_id: str) -> dict[str, int]:
+        """获取学生所有知识点的掌握程度"""
+        async with self._async_sessionmaker() as session:
+            result = await session.execute(
+                select(MasteryORM).where(MasteryORM.student_id == student_id)
+            )
+            records = result.scalars().all()
+            return {r.point_id: r.mastery_level for r in records}
+
+    async def save_mastery(self, student_id: str, point_id: str, level: int) -> MasteryORM:
+        """保存或更新知识点掌握程度"""
+        async with self._async_sessionmaker() as session:
+            result = await session.execute(
+                select(MasteryORM).where(
+                    MasteryORM.student_id == student_id,
+                    MasteryORM.point_id == point_id,
+                )
+            )
+            mastery = result.scalar_one_or_none()
+
+            if mastery:
+                mastery.mastery_level = level
+                mastery.updated_at = datetime.now()
+            else:
+                mastery = MasteryORM(
+                    student_id=student_id,
+                    point_id=point_id,
+                    mastery_level=level,
+                )
+                session.add(mastery)
+
+            await session.commit()
+            await session.refresh(mastery)
+            return mastery
+
+    async def get_all_mastery(self, student_id: str) -> list[MasteryORM]:
+        """获取学生所有掌握程度记录"""
+        async with self._async_sessionmaker() as session:
+            result = await session.execute(
+                select(MasteryORM).where(MasteryORM.student_id == student_id)
+            )
+            return list(result.scalars().all())
 
 
 # 默认存储实例

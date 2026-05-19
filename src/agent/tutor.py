@@ -5,6 +5,7 @@ from pathlib import Path
 
 from openai import AsyncOpenAI
 
+from src.agent.intent import get_intent_recognizer, IntentResult
 from src.agent.session import Session, SessionManager, SessionState
 from src.config.settings import get_config
 from src.engine.diagnose import get_diagnose_engine
@@ -12,9 +13,9 @@ from src.engine.explain import get_explain_engine, Explanation
 from src.engine.grader import get_grader_engine, GradeResult
 from src.engine.quiz import get_quiz_engine, Quiz
 from src.knowledge.graph import KnowledgeGraph, get_graph
-from src.knowledge.math_g3g5 import get_points_by_grade
+from src.knowledge.math_g3g5 import get_points_by_grade, ALL_POINTS, get_point_by_id
 from src.memory.store import get_store, QuizHistoryORM
-from src.memory.student import StudentModel
+from src.memory.student import StudentModel, MasteryLevel
 
 
 class TutorAgent:
@@ -34,6 +35,7 @@ class TutorAgent:
         self._explain_engine = None
         self._diagnose_engine = None
         self._store = None
+        self._intent_recognizer = None
 
     def _load_system_prompt(self) -> str:
         """加载系统prompt"""
@@ -72,6 +74,22 @@ class TutorAgent:
             self._store = await get_store()
         if self.client is None:
             self.client = self.config.get_client(async_client=True)
+        if self._intent_recognizer is None:
+            self._intent_recognizer = get_intent_recognizer()
+
+    def _build_messages(self, session: Session, user_message: str) -> list[dict]:
+        """构建对话消息列表（包含历史上下文）"""
+        messages = [{"role": "system", "content": self._system_prompt}]
+
+        # 取最近20条消息作为上下文
+        recent_messages = session.get_recent_messages(20)
+        for msg in recent_messages:
+            messages.append({"role": msg.role, "content": msg.content})
+
+        # 添加当前用户消息
+        messages.append({"role": "user", "content": user_message})
+
+        return messages
 
     async def start_session(self, student_id: str) -> str:
         """开始学习会话"""
@@ -85,15 +103,19 @@ class TutorAgent:
         # 创建会话
         session = self.session_manager.create_session(student_id)
 
+        # 加载掌握程度到 session metadata
+        mastery_data = await self._store.get_mastery(student_id)
+        session.metadata = {"mastery": mastery_data}
+
         # 生成开场白
-        greeting = await self._generate_greeting(student)
+        greeting = await self._generate_greeting(student, mastery_data)
 
         session.add_message("assistant", greeting, "command")
         session.set_state(SessionState.QUIZ)
 
         return greeting
 
-    async def _generate_greeting(self, student) -> str:
+    async def _generate_greeting(self, student, mastery_data: dict) -> str:
         """生成开场白"""
         # 获取历史统计
         stats = await self._store.get_student_history(student.id, limit=5)
@@ -109,6 +131,10 @@ class TutorAgent:
         correct_count = sum(1 for r in stats if r.is_correct)
         accuracy = correct_count / recent_count if recent_count > 0 else 0
 
+        # 统计掌握程度
+        mastered = sum(1 for level in mastery_data.values() if level >= MasteryLevel.MASTERED.value)
+        fuzzy = sum(1 for level in mastery_data.values() if level == MasteryLevel.FUZZY.value)
+
         if accuracy >= 0.8:
             emoji = "🌟"
             comment = "进步很大！"
@@ -119,9 +145,14 @@ class TutorAgent:
             emoji = "📚"
             comment = "加油加油！"
 
+        mastery_info = ""
+        if fuzzy > 0:
+            mastery_info = f"\n还有{fuzzy}个知识点需要加强练习哦~"
+
         return f"""👋 欢迎回来！{emoji}
 
-你最近完成了{recent_count}道题，正确率{accuracy:.0%}，{comment}
+你最近完成了{recent_count}道题，正确率{accuracy:.0%}，{comment}{mastery_info}
+已掌握{mastered}个知识点，继续加油！
 
 今天你想学什么？可以告诉我：
 - "出题" - 我给你出题做
@@ -162,27 +193,18 @@ class TutorAgent:
 
     async def _parse_intent(self, message: str, session: Session) -> str:
         """解析用户意图"""
-        message_lower = message.strip().lower()
+        # 使用LLM意图识别
+        result: IntentResult = await self._intent_recognizer.recognize(
+            message,
+            state=session.state.value,
+        )
 
-        # 简单规则
-        keywords = {
-            "quiz": ["出题", "题目", "做道题", "开始", "next", "下一题"],
-            "answer": ["答案", "答", "答案是"],
-            "explain": ["讲解", "解释", "为什么", "不懂", "教我"],
-            "diagnose": ["诊断", "分析", "看看", "情况", "复习"],
-        }
-
-        for intent, words in keywords.items():
-            if any(word in message_lower for word in words):
-                return intent
-
-        # 如果在做题状态，可能是在回答
+        # 特殊处理：在QUIZ状态下，如果识别为chat但置信度低，当作answer处理
         if session.state == SessionState.QUIZ and session.current_quiz:
-            # 简单的答案检测
-            if message.replace(" ", "").replace("，", "").replace("。", ""):
+            if result.intent == "chat" and result.confidence < 0.6:
                 return "answer"
 
-        return "chat"
+        return result.intent
 
     async def _handle_quiz(self, student_id: str, session: Session) -> str:
         """处理出题请求"""
@@ -195,14 +217,45 @@ class TutorAgent:
         if not points:
             return "哎呀，还没有加载知识点呢~ 先休息一下吧 😴"
 
-        # 简单选择知识点（可以改进为根据薄弱点）
-        point = points[len(session.messages) % len(points)]
+        # 获取掌握程度
+        mastery_data = await self._store.get_mastery(student_id)
+        session.metadata = {"mastery": mastery_data}
+
+        # 优先选择薄弱点
+        weak_points = [
+            p for p in points
+            if mastery_data.get(p.id, 0) in (
+                MasteryLevel.FUZZY.value,
+                MasteryLevel.FORGOTTEN.value,
+            )
+        ]
+
+        # 获取上一题的知识点
+        last_quiz = session.get_last_quiz()
+        last_point_id = last_quiz.get("point_id") if last_quiz else None
+
+        if weak_points:
+            # 过滤掉上一题的知识点，避免重复
+            candidates = [p for p in weak_points if p.id != last_point_id]
+            if not candidates:
+                candidates = weak_points
+            point = candidates[len(session.messages) % len(candidates)]
+        else:
+            # 新学生或无薄弱点，按年级顺序出题
+            candidates = [p for p in points if p.id != last_point_id]
+            if not candidates:
+                candidates = points
+            point = candidates[len(session.messages) % len(candidates)]
+
+        # 获取历史记录用于出题参考
+        history = await self._store.get_student_history(student_id, limit=10)
 
         # 生成题目
         quiz = await self._quiz_engine.generate(point)
 
         # 保存当前题目
         session.current_quiz = quiz
+        session.metadata["point_id"] = point.id
         session.set_state(SessionState.QUIZ)
 
         return f"""📝 来做道题吧！
@@ -224,18 +277,18 @@ class TutorAgent:
             return '我现在没有题目给你做呢~ 说"出题"来获取题目吧！'
 
         quiz = session.current_quiz
+        point_id = session.metadata.get("point_id", "unknown")
 
         # 批改
         result = await self._grader_engine.grade(quiz, message)
 
-        # 获取知识点
+        # 获取学生信息
         student = await self._store.get_student(student_id)
-        point_name = "数学题"
 
-        # 保存记录
+        # 保存答题记录
         await self._store.add_quiz_record(
             student_id=student_id,
-            point_id="math_quiz",
+            point_id=point_id,
             question=quiz.question,
             student_answer=message,
             is_correct=result.is_correct,
@@ -243,13 +296,43 @@ class TutorAgent:
             difficulty=2,
         )
 
+        # 持久化掌握程度
+        new_level = MasteryLevel.UNKNOWN
+        if result.is_correct:
+            new_level = MasteryLevel.EXPOSING
+        else:
+            new_level = MasteryLevel.EXPOSING
+        await self._store.save_mastery(student_id, point_id, new_level.value)
+
+        # 更新学生XP
+        old_xp = student.total_xp
+        xp_gain = 10 if result.is_correct else 3
+        if result.is_correct:
+            student.total_xp += xp_gain
+        else:
+            student.total_xp += xp_gain
+        await self._store.update_student_xp(student_id, xp_gain)
+
+        # 检查升级
+        level = 1 + student.total_xp // 100
+        level_up_msg = ""
+        if level > (1 + old_xp // 100):
+            level_up_msg = f"\n\n🎉 恭喜你升到了{level}级！太棒了！"
+
+        # 获取知识点名称
+        point = get_point_by_id(point_id)
+        point_name = point.name if point else "数学题"
+
         # 清除当前题目
         session.current_quiz = None
         session.set_state(SessionState.IDLE)
 
-        return f"""{result.feedback}
+        response = f"""{result.feedback}
+
+**{point_name}** 完成了！经验值+{xp_gain}{level_up_msg}
 
 想继续做题就说"下一题"哦~ ✨"""
+        return response
 
     async def _handle_explain(
         self,
@@ -258,19 +341,17 @@ class TutorAgent:
         session: Session,
     ) -> str:
         """处理讲解请求"""
-        # 调用LLM生成讲解
+        # 使用对话历史
+        messages = self._build_messages(session, message)
+
         response = await self.client.chat.completions.create(
             model=self.config.llm.model,
-            messages=[
-                {"role": "system", "content": self._system_prompt},
-                {"role": "user", "content": message},
-            ],
+            messages=messages,
             temperature=0.7,
             max_tokens=500,
         )
 
-        explanation = response.choices[0].message.content
-        return explanation
+        return response.choices[0].message.content
 
     async def _handle_diagnose(
         self,
@@ -315,12 +396,12 @@ class TutorAgent:
         session: Session,
     ) -> str:
         """处理闲聊"""
+        # 使用对话历史
+        messages = self._build_messages(session, message)
+
         response = await self.client.chat.completions.create(
             model=self.config.llm.model,
-            messages=[
-                {"role": "system", "content": self._system_prompt},
-                {"role": "user", "content": message},
-            ],
+            messages=messages,
             temperature=0.8,
             max_tokens=300,
         )

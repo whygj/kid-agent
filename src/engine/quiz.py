@@ -15,9 +15,9 @@ from src.knowledge.math_g3g5 import KnowledgePoint
 class Quiz:
     """生成的题目"""
     question: str
-    options: list[str] | None = None  # 选择题选项
-    answer: str  # 标准答案
-    explanation: str  # 答案解释
+    options: list[str] | None = None
+    answer: str = ""  # 标准答案
+    explanation: str = ""  # 答案解释
     question_type: str = "free"  # free, choice, calculation
 
 
