@@ -418,7 +418,7 @@ class TestKeywordMatching:
 
         for feedback, expected in test_cases:
             is_correct = any(
-                kw in feedback for kw in ["正确", "对的", "太棒了", "完全正确", "很好"]
+                kw in feedback for kw in ["正确", "对的", "太棒了", "完全正确", "很好", "答对了"]
             )
             assert is_correct == expected, f"Failed for: {feedback}"
 
@@ -433,7 +433,7 @@ class TestKeywordMatching:
 
         for feedback in test_cases:
             is_correct = any(
-                kw in feedback for kw in ["正确", "对的", "太棒了", "完全正确", "很好"]
+                kw in feedback for kw in ["正确", "对的", "太棒了", "完全正确", "很好", "答对了"]
             )
             assert is_correct is False, f"Failed for: {feedback}"
 

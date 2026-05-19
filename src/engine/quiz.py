@@ -80,12 +80,7 @@ class QuizEngine:
             difficulty = knowledge_point.difficulty.value
 
         # 准备prompt
-        prompt = self._prompt_template.format(
-            name=knowledge_point.name,
-            grade=knowledge_point.grade,
-            difficulty=difficulty,
-            description=knowledge_point.description,
-        )
+        prompt = self._prompt_template.replace('{name}', knowledge_point.name).replace('{grade}', str(knowledge_point.grade)).replace('{difficulty}', str(difficulty)).replace('{description}', knowledge_point.description)
 
         # 添加历史参考
         if student_history:
