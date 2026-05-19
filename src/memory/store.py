@@ -60,6 +60,25 @@ class MasteryORM(Base):
     )
 
 
+class ReviewScheduleORM(Base):
+    """复习计划表"""
+    __tablename__ = "review_schedule"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    student_id: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    point_id: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    next_review_date: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+    review_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_reviewed: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    __table_args__ = (
+        Index("idx_review_student", "student_id", "next_review_date"),
+        Index("idx_student_point_review", "student_id", "point_id", unique=True),
+    )
+
+
 class MemoryStore:
     """内存存储类"""
 
@@ -294,6 +313,111 @@ class MemoryStore:
                 select(MasteryORM).where(MasteryORM.student_id == student_id)
             )
             return list(result.scalars().all())
+
+    async def save_review_schedule(
+        self,
+        student_id: str,
+        point_id: str,
+        next_review_date: datetime,
+        review_count: int = 0,
+        last_reviewed: datetime | None = None,
+    ) -> ReviewScheduleORM:
+        """保存或更新复习计划"""
+        async with self._async_sessionmaker() as session:
+            result = await session.execute(
+                select(ReviewScheduleORM).where(
+                    ReviewScheduleORM.student_id == student_id,
+                    ReviewScheduleORM.point_id == point_id,
+                )
+            )
+            schedule = result.scalar_one_or_none()
+
+            if schedule:
+                schedule.next_review_date = next_review_date
+                schedule.review_count = review_count
+                schedule.last_reviewed = last_reviewed
+                schedule.updated_at = datetime.now()
+            else:
+                schedule = ReviewScheduleORM(
+                    student_id=student_id,
+                    point_id=point_id,
+                    next_review_date=next_review_date,
+                    review_count=review_count,
+                    last_reviewed=last_reviewed,
+                )
+                session.add(schedule)
+
+            await session.commit()
+            await session.refresh(schedule)
+            return schedule
+
+    async def get_review_schedule(
+        self,
+        student_id: str,
+        point_id: str,
+    ) -> ReviewScheduleORM | None:
+        """获取指定知识点的复习计划"""
+        async with self._async_sessionmaker() as session:
+            result = await session.execute(
+                select(ReviewScheduleORM).where(
+                    ReviewScheduleORM.student_id == student_id,
+                    ReviewScheduleORM.point_id == point_id,
+                )
+            )
+            return result.scalar_one_or_none()
+
+    async def get_due_reviews(
+        self,
+        student_id: str,
+        review_date: datetime | None = None,
+    ) -> list[ReviewScheduleORM]:
+        """获取到期的复习计划"""
+        if review_date is None:
+            review_date = datetime.now()
+
+        async with self._async_sessionmaker() as session:
+            result = await session.execute(
+                select(ReviewScheduleORM)
+                .where(
+                    ReviewScheduleORM.student_id == student_id,
+                    ReviewScheduleORM.next_review_date <= review_date,
+                )
+                .order_by(ReviewScheduleORM.review_count, ReviewScheduleORM.next_review_date)
+            )
+            return list(result.scalars().all())
+
+    async def get_all_review_schedules(
+        self,
+        student_id: str,
+    ) -> list[ReviewScheduleORM]:
+        """获取学生的所有复习计划"""
+        async with self._async_sessionmaker() as session:
+            result = await session.execute(
+                select(ReviewScheduleORM)
+                .where(ReviewScheduleORM.student_id == student_id)
+                .order_by(ReviewScheduleORM.next_review_date)
+            )
+            return list(result.scalars().all())
+
+    async def delete_review_schedule(
+        self,
+        student_id: str,
+        point_id: str,
+    ) -> bool:
+        """删除复习计划"""
+        async with self._async_sessionmaker() as session:
+            result = await session.execute(
+                select(ReviewScheduleORM).where(
+                    ReviewScheduleORM.student_id == student_id,
+                    ReviewScheduleORM.point_id == point_id,
+                )
+            )
+            schedule = result.scalar_one_or_none()
+            if schedule:
+                await session.delete(schedule)
+                await session.commit()
+                return True
+            return False
 
 
 # 默认存储实例

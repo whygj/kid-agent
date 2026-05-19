@@ -1,17 +1,22 @@
 """核心教学Agent - 协调所有引擎进行教学对话"""
 
 import asyncio
+from datetime import datetime
 from pathlib import Path
 
 from openai import AsyncOpenAI
 
 from src.agent.intent import get_intent_recognizer, IntentResult
+from src.agent.planner import get_planner, StudyPlan
+from src.agent.roster import get_student_roster, StudentRoster
 from src.agent.session import Session, SessionManager, SessionState
 from src.config.settings import get_config
+from src.engine.adaptive import get_adaptive_difficulty
 from src.engine.diagnose import get_diagnose_engine
 from src.engine.explain import get_explain_engine, Explanation
 from src.engine.grader import get_grader_engine, GradeResult
 from src.engine.quiz import get_quiz_engine, Quiz
+from src.engine.review import get_review_scheduler
 from src.knowledge.graph import KnowledgeGraph, get_graph
 from src.knowledge.math_g3g5 import get_points_by_grade, ALL_POINTS, get_point_by_id
 from src.memory.store import get_store, QuizHistoryORM
@@ -36,6 +41,12 @@ class TutorAgent:
         self._diagnose_engine = None
         self._store = None
         self._intent_recognizer = None
+
+        # 新系统（懒加载）
+        self._planner = None
+        self._adaptive_difficulty = None
+        self._review_scheduler = None
+        self._student_roster = None
 
     def _load_system_prompt(self) -> str:
         """加载系统prompt"""
@@ -77,6 +88,20 @@ class TutorAgent:
         if self._intent_recognizer is None:
             self._intent_recognizer = get_intent_recognizer()
 
+        # 初始化新系统
+        if self._planner is None:
+            self._planner = get_planner()
+        if self._adaptive_difficulty is None:
+            self._adaptive_difficulty = get_adaptive_difficulty()
+        if self._review_scheduler is None:
+            self._review_scheduler = get_review_scheduler()
+        if self._student_roster is None:
+            self._student_roster = get_student_roster()
+            self._student_roster._store = self._store
+            self._student_roster._graph = self._graph
+        if self._review_scheduler._store is None:
+            self._review_scheduler._store = self._store
+
     def _build_messages(self, session: Session, user_message: str) -> list[dict]:
         """构建对话消息列表（包含历史上下文）"""
         messages = [{"role": "system", "content": self._system_prompt}]
@@ -107,23 +132,39 @@ class TutorAgent:
         mastery_data = await self._store.get_mastery(student_id)
         session.metadata = {"mastery": mastery_data}
 
+        # 生成学习计划
+        study_plan = self._planner.generate_study_plan(
+            student_id=student_id,
+            grade=student.grade,
+            mastery_dict=mastery_data,
+            mastery_level_enum=MasteryLevel,
+        )
+        session.metadata["study_plan"] = study_plan
+
         # 生成开场白
-        greeting = await self._generate_greeting(student, mastery_data)
+        greeting = await self._generate_greeting(student, mastery_data, study_plan)
 
         session.add_message("assistant", greeting, "command")
         session.set_state(SessionState.QUIZ)
 
         return greeting
 
-    async def _generate_greeting(self, student, mastery_data: dict) -> str:
+    async def _generate_greeting(
+        self,
+        student,
+        mastery_data: dict,
+        study_plan: StudyPlan,
+    ) -> str:
         """生成开场白"""
         # 获取历史统计
         stats = await self._store.get_student_history(student.id, limit=5)
 
         if not stats:
-            return """👋 你好呀！我是小助手，今天我们一起学数学吧！
+            return f"""👋 你好呀！我是小助手，今天我们一起学数学吧！
 
 我们先来做个小测试，看看你最近学了哪些内容，好不好？
+
+{study_plan.reason}
 
 准备好了就告诉我"开始"哦~"""
 
@@ -149,13 +190,24 @@ class TutorAgent:
         if fuzzy > 0:
             mastery_info = f"\n还有{fuzzy}个知识点需要加强练习哦~"
 
+        # 显示学习计划信息
+        plan_info = ""
+        if study_plan.current_focus != "complete":
+            point = get_point_by_id(study_plan.current_focus)
+            point_name = point.name if point else "新知识点"
+            plan_info = f"\n📌 今天我们重点学习：{point_name}"
+
         return f"""👋 欢迎回来！{emoji}
 
 你最近完成了{recent_count}道题，正确率{accuracy:.0%}，{comment}{mastery_info}
-已掌握{mastered}个知识点，继续加油！
+已掌握{mastered}个知识点，继续加油！{plan_info}
+
+{study_plan.reason}
 
 今天你想学什么？可以告诉我：
 - "出题" - 我给你出题做
+- "学习计划" - 查看你的学习路线
+- "学习报告" - 查看学习报告
 - "帮我看看" - 我帮你分析学习情况
 - 或者直接问任何数学问题！
 
@@ -183,6 +235,10 @@ class TutorAgent:
             response = await self._handle_explain(student_id, message, session)
         elif intent == "diagnose":
             response = await self._handle_diagnose(student_id, session)
+        elif intent == "plan":
+            response = await self._handle_plan(student_id, session)
+        elif intent == "report":
+            response = await self._handle_report(student_id, session)
         elif intent == "chat":
             response = await self._handle_chat(student_id, message, session)
         else:
@@ -221,46 +277,80 @@ class TutorAgent:
         mastery_data = await self._store.get_mastery(student_id)
         session.metadata = {"mastery": mastery_data}
 
-        # 优先选择薄弱点
-        weak_points = [
-            p for p in points
-            if mastery_data.get(p.id, 0) in (
-                MasteryLevel.FUZZY.value,
-                MasteryLevel.FORGOTTEN.value,
-            )
-        ]
+        # 优先检查是否需要复习
+        due_reviews = await self._store.get_due_reviews(student_id)
 
         # 获取上一题的知识点
         last_quiz = session.get_last_quiz()
         last_point_id = last_quiz.get("point_id") if last_quiz else None
 
-        if weak_points:
-            # 过滤掉上一题的知识点，避免重复
-            candidates = [p for p in weak_points if p.id != last_point_id]
-            if not candidates:
-                candidates = weak_points
-            point = candidates[len(session.messages) % len(candidates)]
+        selected_point = None
+        review_mode = False
+
+        if due_reviews:
+            # 优先出复习题
+            review_item = due_reviews[0]
+            selected_point = get_point_by_id(review_item.point_id)
+            if selected_point:
+                review_mode = True
+                # 过滤掉上一题的知识点，避免重复
+                if selected_point.id == last_point_id and len(due_reviews) > 1:
+                    selected_point = get_point_by_id(due_reviews[1].point_id)
         else:
-            # 新学生或无薄弱点，按年级顺序出题
-            candidates = [p for p in points if p.id != last_point_id]
-            if not candidates:
-                candidates = points
-            point = candidates[len(session.messages) % len(candidates)]
+            # 优先选择薄弱点
+            weak_points = [
+                p for p in points
+                if mastery_data.get(p.id, 0) in (
+                    MasteryLevel.FUZZY.value,
+                    MasteryLevel.FORGOTTEN.value,
+                )
+            ]
+
+            if weak_points:
+                # 过滤掉上一题的知识点，避免重复
+                candidates = [p for p in weak_points if p.id != last_point_id]
+                if not candidates:
+                    candidates = weak_points
+                selected_point = candidates[len(session.messages) % len(candidates)]
+            else:
+                # 新学生或无薄弱点，使用学习计划
+                study_plan = session.metadata.get("study_plan")
+                if study_plan and study_plan.current_focus != "complete":
+                    selected_point = get_point_by_id(study_plan.current_focus)
+                else:
+                    # 按年级顺序出题
+                    candidates = [p for p in points if p.id != last_point_id]
+                    if not candidates:
+                        candidates = points
+                    selected_point = candidates[len(session.messages) % len(candidates)]
+
+        if not selected_point:
+            selected_point = points[0]
+
+        # 获取自适应难度
+        history = await self._store.get_student_history(student_id, limit=5)
+        difficulty = self._adaptive_difficulty.get_difficulty(student_id, history, selected_point.difficulty.value)
 
         # 获取历史记录用于出题参考
-        history = await self._store.get_student_history(student_id, limit=10)
+        full_history = await self._store.get_student_history(student_id, limit=10)
 
         # 生成题目
-        quiz = await self._quiz_engine.generate(point)
+        quiz = await self._quiz_engine.generate(selected_point, difficulty=difficulty)
 
         # 保存当前题目
         session.current_quiz = quiz
-        session.metadata["point_id"] = point.id
+        session.metadata["point_id"] = selected_point.id
+        session.metadata["difficulty"] = difficulty
+        session.metadata["review_mode"] = review_mode
         session.set_state(SessionState.QUIZ)
 
-        return f"""📝 来做道题吧！
+        review_hint = ""
+        if review_mode:
+            review_hint = "（复习题）"
 
-**{point.name}**
+        return f"""📝 来做道题吧！{review_hint}
+
+**{selected_point.name}**
 
 {quiz.question}
 
@@ -278,6 +368,8 @@ class TutorAgent:
 
         quiz = session.current_quiz
         point_id = session.metadata.get("point_id", "unknown")
+        difficulty = session.metadata.get("difficulty", 2)
+        review_mode = session.metadata.get("review_mode", False)
 
         # 批改
         result = await self._grader_engine.grade(quiz, message)
@@ -293,7 +385,7 @@ class TutorAgent:
             student_answer=message,
             is_correct=result.is_correct,
             feedback=result.feedback,
-            difficulty=2,
+            difficulty=difficulty,
         )
 
         # 持久化掌握程度
@@ -303,6 +395,28 @@ class TutorAgent:
         else:
             new_level = MasteryLevel.EXPOSING
         await self._store.save_mastery(student_id, point_id, new_level.value)
+
+        # 更新自适应难度
+        self._adaptive_difficulty.update_after_answer(student_id, result.is_correct)
+
+        # 更新复习计划
+        if review_mode:
+            point = get_point_by_id(point_id)
+            point_name = point.name if point else "数学题"
+            await self._store.save_review_schedule(
+                student_id=student_id,
+                point_id=point_id,
+                next_review_date=datetime.now(),  # 立即更新
+                review_count=0,  # 会被更新
+                last_reviewed=datetime.now(),
+            )
+            # 使用复习调度器更新间隔
+            self._review_scheduler.update_after_review(
+                student_id=student_id,
+                point_id=point_id,
+                is_correct=result.is_correct,
+                point_name=point_name,
+            )
 
         # 更新学生XP
         old_xp = student.total_xp
@@ -425,6 +539,91 @@ class TutorAgent:
 今天想学什么？"""
         else:
             return "👋 你好呀！今天想学数学吗？来试试吧~ 📝"
+
+    async def _handle_plan(
+        self,
+        student_id: str,
+        session: Session,
+    ) -> str:
+        """处理学习计划请求"""
+        student = await self._store.get_student(student_id)
+        if not student:
+            return "还没有你的学习记录呢，先做题吧！"
+
+        # 获取掌握程度
+        mastery_data = await self._store.get_mastery(student_id)
+
+        # 生成学习计划
+        study_plan = self._planner.generate_study_plan(
+            student_id=student_id,
+            grade=student.grade,
+            mastery_dict=mastery_data,
+            mastery_level_enum=MasteryLevel,
+        )
+
+        # 获取知识点名称
+        current_point = get_point_by_id(study_plan.current_focus)
+        current_name = current_point.name if current_point else "未知"
+
+        # 构建下一步学习路径
+        next_steps_names = []
+        for step_id in study_plan.next_steps[:5]:
+            point = get_point_by_id(step_id)
+            if point:
+                next_steps_names.append(point.name)
+
+        # 获取需要复习的知识点
+        review_names = []
+        if study_plan.review_points:
+            for review_id in study_plan.review_points[:3]:
+                point = get_point_by_id(review_id)
+                if point:
+                    review_names.append(point.name)
+
+        lines = [
+            "📚 你的学习路线",
+            "━━━━━━━━━━━━━━━━━━━━━━",
+            f"",
+            f"🎯 当前重点：**{current_name}**",
+            f"",
+            f"💡 {study_plan.reason}",
+            f"",
+            f"📖 接下来要学：",
+        ]
+
+        for i, name in enumerate(next_steps_names, 1):
+            lines.append(f"  {i}. {name}")
+
+        if review_names:
+            lines.append("")
+            lines.append("🔄 需要复习：")
+            for name in review_names:
+                lines.append(f"  • {name}")
+
+        lines.append("")
+        lines.append(f"预计需要{study_plan.estimated_sessions}次学习")
+        lines.append("")
+        lines.append('准备好了就说"出题"开始学习吧！✨')
+
+        return "\n".join(lines)
+
+    async def _handle_report(
+        self,
+        student_id: str,
+        session: Session,
+    ) -> str:
+        """处理学习报告请求"""
+        student = await self._store.get_student(student_id)
+        if not student:
+            return "还没有你的学习记录呢，先做题吧！"
+
+        # 使用 StudentRoster 生成报告
+        report = await self._student_roster.get_student_report(student_id)
+
+        if not report:
+            return "生成学习报告时出错了，请稍后再试~"
+
+        return self._student_roster.format_report_text(report)
 
 
 # 默认教学Agent实例

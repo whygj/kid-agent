@@ -10,6 +10,8 @@ from rich.prompt import Prompt
 from rich.text import Text
 
 from src.agent.tutor import get_tutor_agent
+from src.agent.roster import get_student_roster
+from src.memory.store import get_store
 
 
 async def cli_mode(student_id: str):
@@ -76,6 +78,57 @@ async def api_mode():
     console.print("API模式尚未实现，敬请期待！🚧", style="yellow")
 
 
+async def list_students():
+    """列出所有学生"""
+    console = Console()
+    console.print("正在加载学生数据...", style="dim")
+
+    store = await get_store()
+    roster = get_student_roster()
+    roster._store = store
+    roster._graph = None
+
+    # 获取所有学生（暂时返回空列表，需要扩展store.py）
+    students = []
+
+    if not students:
+        console.print("还没有学生注册呢！先开始学习吧~", style="yellow")
+        return
+
+    console.print("📚 学生列表", style="bold blue")
+    console.print()
+
+    for i, student in enumerate(students, 1):
+        summary_text = roster.format_summary_text(student)
+        console.print(Panel(summary_text, title=f"学生 {i}", border_style="blue"))
+        console.print()
+
+
+async def show_report(student_id: str):
+    """显示学生学习报告"""
+    console = Console()
+    console.print("正在生成学习报告...", style="dim")
+
+    store = await get_store()
+    roster = get_student_roster()
+    roster._store = store
+
+    from src.knowledge.graph import get_graph
+    roster._graph = get_graph()
+
+    report = await roster.get_student_report(student_id)
+
+    if not report:
+        console.print("没有找到该学生的学习记录", style="red")
+        return
+
+    console.print("📊 学习报告", style="bold blue")
+    console.print()
+
+    report_text = roster.format_report_text(report)
+    console.print(report_text)
+
+
 def main():
     """主入口"""
     parser = argparse.ArgumentParser(
@@ -83,6 +136,9 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
+    subparsers = parser.add_subparsers(dest="command", help="可用命令")
+
+    # 默认CLI模式
     parser.add_argument(
         "--mode",
         choices=["cli", "api"],
@@ -97,9 +153,30 @@ def main():
         help="学生ID",
     )
 
+    # 列出所有学生
+    list_parser = subparsers.add_parser(
+        "list-students",
+        help="列出所有学生"
+    )
+
+    # 查看学习报告
+    report_parser = subparsers.add_parser(
+        "report",
+        help="查看学生学习报告"
+    )
+    report_parser.add_argument(
+        "student_id",
+        type=str,
+        help="学生ID",
+    )
+
     args = parser.parse_args()
 
-    if args.mode == "cli":
+    if args.command == "list-students":
+        asyncio.run(list_students())
+    elif args.command == "report":
+        asyncio.run(show_report(args.student_id))
+    elif args.mode == "cli":
         asyncio.run(cli_mode(args.student))
     else:
         asyncio.run(api_mode())
