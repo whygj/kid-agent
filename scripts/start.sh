@@ -104,6 +104,8 @@ echo ""
 
 # 解析参数
 STUDENT_ID=""
+MODE="cli"
+PORT="8000"
 
 for arg in "$@"; do
     case $arg in
@@ -111,12 +113,28 @@ for arg in "$@"; do
             STUDENT_ID="${arg#*=}"
             shift
             ;;
+        --mode=*)
+            MODE="${arg#*=}"
+            shift
+            ;;
+        --port=*)
+            PORT="${arg#*=}"
+            shift
+            ;;
         --help|-h)
             echo "用法: $0 [选项]"
             echo ""
             echo "选项:"
-            echo "  --student=ID  指定学生ID"
+            echo "  --student=ID  指定学生ID (CLI模式)"
+            echo "  --mode=MODE   运行模式: cli (默认), web, api"
+            echo "  --port=PORT   Web/API服务端口 (默认: 8000)"
             echo "  --help, -h    显示帮助信息"
+            echo ""
+            echo "示例:"
+            echo "  $0                          # CLI模式，默认学生"
+            echo "  $0 --student=小明           # CLI模式，指定学生"
+            echo "  $0 --mode=web               # Web模式，端口8000"
+            echo "  $0 --mode=web --port=3000   # Web模式，端口3000"
             exit 0
             ;;
     esac
@@ -128,9 +146,17 @@ echo -e "${GREEN}正在启动 Kid-Agent...${NC}"
 echo "=================================================="
 echo ""
 
-if [ -n "$STUDENT_ID" ]; then
-    echo "学生ID: $STUDENT_ID"
-    python3 -m src.main --student "$STUDENT_ID"
+echo "运行模式: $MODE"
+
+if [ "$MODE" = "web" ] || [ "$MODE" = "api" ]; then
+    echo "服务端口: $PORT"
+    echo ""
+    python3 -m src.main --mode "$MODE" --port "$PORT"
 else
-    python3 -m src.main
+    if [ -n "$STUDENT_ID" ]; then
+        echo "学生ID: $STUDENT_ID"
+        python3 -m src.main --student "$STUDENT_ID"
+    else
+        python3 -m src.main
+    fi
 fi

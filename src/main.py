@@ -72,10 +72,31 @@ async def cli_mode(student_id: str):
             console.print('输入"exit"退出，或者继续对话~')
 
 
-async def api_mode():
-    """API模式运行（Phase 2）"""
+async def web_mode(port: int):
+    """Web模式运行（Phase 2）"""
+    import uvicorn
+
     console = Console()
-    console.print("API模式尚未实现，敬请期待！🚧", style="yellow")
+    console.print(Panel(
+        "[bold blue]Kid Agent[/bold blue] — Web模式启动",
+        border_style="blue"
+    ))
+
+    # 导入app
+    from src.web.app import app
+
+    console.print(f"\n🚀 服务器启动中... 端口: [bold green]{port}[/bold green]")
+    console.print(f"🌐 访问地址: [bold cyan]http://localhost:{port}[/bold cyan]")
+    console.print("\n按 Ctrl+C 停止服务器\n")
+
+    config = uvicorn.Config(
+        app,
+        host="0.0.0.0",
+        port=port,
+        log_level="info",
+    )
+    server = uvicorn.Server(config)
+    await server.serve()
 
 
 async def list_students():
@@ -141,9 +162,16 @@ def main():
     # 默认CLI模式
     parser.add_argument(
         "--mode",
-        choices=["cli", "api"],
+        choices=["cli", "api", "web"],
         default="cli",
-        help="运行模式: cli(命令行) 或 api(服务)",
+        help="运行模式: cli(命令行), api(API服务) 或 web(Web界面)",
+    )
+
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8000,
+        help="Web/API服务端口 (默认: 8000)",
     )
 
     parser.add_argument(
@@ -178,6 +206,8 @@ def main():
         asyncio.run(show_report(args.student_id))
     elif args.mode == "cli":
         asyncio.run(cli_mode(args.student))
+    elif args.mode == "web":
+        asyncio.run(web_mode(args.port))
     else:
         asyncio.run(api_mode())
 
