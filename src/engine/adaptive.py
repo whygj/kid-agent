@@ -48,7 +48,7 @@ class AdaptiveDifficulty:
         Returns:
             int: 适合的难度值（1-5）
         """
-        state = self._get_state(student_id)
+        state = self._get_state(student_id, default_difficulty)
 
         # 如果提供了历史记录，更新状态
         if history:
@@ -116,11 +116,19 @@ class AdaptiveDifficulty:
             "recent_accuracy": sum(history_list) / len(history_list) if history_list else 0,
         }
 
-    def _get_state(self, student_id: str) -> DifficultyState:
-        """获取或创建学生的难度状态"""
+    def _get_state(self, student_id: str, default_difficulty: int = 2) -> DifficultyState:
+        """获取或创建学生的难度状态
+
+        Args:
+            student_id: 学生ID
+            default_difficulty: 默认难度
+
+        Returns:
+            DifficultyState: 难度状态
+        """
         if student_id not in self._student_states:
             self._student_states[student_id] = DifficultyState(
-                current_difficulty=2,
+                current_difficulty=default_difficulty,
                 recent_correct=0,
                 recent_wrong=0,
                 history=deque(maxlen=5),
@@ -132,14 +140,19 @@ class AdaptiveDifficulty:
         # 取最近5条记录
         recent = history[:5]
 
-        # 统计最近的对错
-        state.recent_correct = sum(1 for h in recent if getattr(h, "is_correct", False))
-        state.recent_wrong = sum(1 for h in recent if not getattr(h, "is_correct", False))
+        # 统计最近的对错（支持简单布尔值和带有 is_correct 属性的对象）
+        def get_is_correct(h: Any) -> bool:
+            if isinstance(h, bool):
+                return h
+            return getattr(h, "is_correct", False)
+
+        state.recent_correct = sum(1 for h in recent if get_is_correct(h))
+        state.recent_wrong = sum(1 for h in recent if not get_is_correct(h))
 
         # 更新历史队列
         state.history.clear()
         for h in recent:
-            state.history.append(getattr(h, "is_correct", False))
+            state.history.append(get_is_correct(h))
 
         # 根据表现调整初始难度
         if state.recent_correct >= 3 and state.recent_wrong == 0:
