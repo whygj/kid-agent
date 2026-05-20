@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "services": {
+    "llm": {
+      "active_profile_id": "llm-profile-default",
+      "active_model_id": "llm-model-default",
+      "profiles": [
+        {
+          "id": "llm-profile-default",
+          "name": "Default LLM Endpoint",
+          "binding": "zhipu",
+          "base_url": "https://open.bigmodel.cn/api/coding/paas/v4",
+          "api_key": "af11ab05b6414a2b8fd34a2f78014075.LzWYloho0pDPKBHh",
+          "api_version": "",
+          "extra_headers": {},
+          "models": [
+            {
+              "id": "llm-model-default",
+              "name": "glm-5.1",
+              "model": "glm-5.1"
+            }
+          ]
+        }
+      ]
+    },
+    "embedding": {
+      "active_profile_id": null,
+      "active_model_id": null,
+      "profiles": []
+    },
+    "search": {
+      "active_profile_id": null,
+      "profiles": []
+    }
+  }
+}

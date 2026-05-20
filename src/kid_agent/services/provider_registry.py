@@ -276,7 +276,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         display_name="Zhipu AI",
         backend="openai_compat",
         env_extras=(("ZHIPUAI_API_KEY", "{api_key}"),),
-        default_api_base="https://open.bigmodel.cn/api/paas/v4",
+        default_api_base="https://open.bigmodel.cn/api/coding/paas/v4",
     ),
     ProviderSpec(
         name="dashscope",
