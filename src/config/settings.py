@@ -46,11 +46,21 @@ class VoiceConfig:
 
 
 @dataclass
+class WeChatConfig:
+    """微信公众号配置"""
+    app_id: str = ""
+    app_secret: str = ""
+    token: str = "kidagent2024"
+    encoding_aes_key: str = ""
+
+
+@dataclass
 class Config:
     """全局配置"""
     llm: LLMConfig
     db: DBConfig
     voice: VoiceConfig
+    wechat: WeChatConfig
     log_level: str = "INFO"
 
     @classmethod
@@ -107,10 +117,18 @@ class Config:
             auto_play=os.getenv("TTS_AUTO_PLAY", "true").lower() == "true",
         )
 
+        wechat_config = WeChatConfig(
+            app_id=os.getenv("WECHAT_APP_ID", ""),
+            app_secret=os.getenv("WECHAT_APP_SECRET", ""),
+            token=os.getenv("WECHAT_TOKEN", "kidagent2024"),
+            encoding_aes_key=os.getenv("WECHAT_ENCODING_AES_KEY", ""),
+        )
+
         config = cls(
             llm=llm_config,
             db=db_config,
             voice=voice_config,
+            wechat=wechat_config,
             log_level=os.getenv("LOG_LEVEL", "INFO"),
         )
 
@@ -167,6 +185,8 @@ class Config:
         logger.info(f"  TTS 提供商  : {self.voice.tts_provider}")
         logger.info(f"  TTS 语音    : {self.voice.tts_voice}")
         logger.info(f"  TTS 自动播放: {self.voice.auto_play}")
+        logger.info(f"  微信 AppID  : {self.wechat.app_id or '(未配置)'}")
+        logger.info(f"  微信 Token  : {self.wechat.token}")
         logger.info(f"  日志级别    : {self.log_level.upper()}")
         logger.info("═════════════════════════════════════════════════════════")
 

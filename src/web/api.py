@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Query, status
 from fastapi.responses import Response
 from pydantic import ValidationError
 
@@ -24,6 +24,7 @@ from src.web.models import (
 )
 
 router = APIRouter(prefix="/api", tags=["api"])
+wechat_router = APIRouter(prefix="/wechat", tags=["wechat"])
 
 
 @router.post("/session/start", response_model=SessionStartResponse)
@@ -233,3 +234,122 @@ async def text_to_speech(request: TTSRequest):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"处理请求失败: {str(e)}",
         ) from e
+
+
+# 微信公众号路由
+@wechat_router.get("/verify")
+async def wechat_verify(
+    signature: str = Query(..., description="微信签名"),
+    timestamp: str = Query(..., description="时间戳"),
+    nonce: str = Query(..., description="随机数"),
+    echostr: str = Query(..., description="随机字符串"),
+) -> str:
+    """微信服务器验证
+
+    用于微信公众号服务器配置验证
+    """
+    from src.wechat.server import get_wechat_server
+
+    server = await get_wechat_server()
+    result = await server.verify(signature, timestamp, nonce, echostr)
+
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Signature verification failed"
+        )
+
+    return result
+
+
+@wechat_router.post("/message")
+async def wechat_message(body: str):
+    """接收微信消息
+
+    接收微信公众号推送的消息并返回回复
+    """
+    from src.wechat.server import get_wechat_server
+
+    server = await get_wechat_server()
+    reply = await server.handle_message(body)
+
+    return Response(
+        content=reply,
+        media_type="application/xml",
+    )
+
+
+@wechat_router.post("/bind")
+async def wechat_bind(
+    wechat_user_id: str = Query(..., description="微信用户OpenID"),
+    student_id: str = Query(..., description="学生ID"),
+    role: str = Query("student", description="角色: student 或 parent"),
+) -> dict[str, str]:
+    """手动绑定微信账号
+
+    用于测试或管理绑定关系
+    """
+    from src.wechat.binding import get_user_binding
+
+    binding = get_user_binding()
+    result = await binding.bind(wechat_user_id, student_id, role)
+
+    return {"message": result}
+
+
+@wechat_router.post("/notify/{student_id}")
+async def wechat_notify(
+    student_id: str,
+    report_type: str = Query("daily", description="报告类型: daily 或 achievement"),
+) -> dict[str, Any]:
+    """触发家长通知
+
+    手动触发家长通知发送
+    """
+    from src.wechat.notify import get_parent_notifier
+
+    notifier = get_parent_notifier()
+
+    if report_type == "daily":
+        success = await notifier.send_daily_report(student_id)
+    else:
+        success = await notifier.send_achievement(student_id, "测试通知", "这是一条测试消息")
+
+    return {"success": success, "student_id": student_id}
+
+
+@wechat_router.get("/menu")
+async def get_menu() -> dict[str, Any]:
+    """获取微信菜单配置"""
+    import json
+    from pathlib import Path
+
+    menu_path = Path(__file__).parent.parent.parent / "src" / "wechat" / "menu.json"
+    if menu_path.exists():
+        with open(menu_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {"button": []}
+
+
+@wechat_router.post("/menu/create")
+async def create_menu() -> dict[str, Any]:
+    """创建微信自定义菜单"""
+    from src.wechat.client import get_wechat_client
+
+    client = await get_wechat_client()
+    import json
+    from pathlib import Path
+
+    menu_path = Path(__file__).parent.parent.parent / "src" / "wechat" / "menu.json"
+    if not menu_path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Menu config not found"
+        )
+
+    with open(menu_path, "r", encoding="utf-8") as f:
+        menu_data = json.load(f)
+
+    success = await client.create_menu(menu_data)
+
+    return {"success": success}

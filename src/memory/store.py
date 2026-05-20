@@ -17,6 +17,21 @@ class Base(DeclarativeBase):
     pass
 
 
+class WeChatBindingORM(Base):
+    """微信绑定表"""
+    __tablename__ = "wechat_bindings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    wechat_user_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    student_id: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    role: Mapped[str] = mapped_column(String(20), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    __table_args__ = (
+        Index("idx_wechat_user_role", "wechat_user_id", "role", unique=True),
+    )
+
+
 class StudentORM(Base):
     """学生表"""
     __tablename__ = "students"
@@ -418,6 +433,96 @@ class MemoryStore:
                 await session.commit()
                 return True
             return False
+
+    async def create_wechat_binding(
+        self,
+        wechat_user_id: str,
+        student_id: str,
+        role: str = "student",
+    ) -> WeChatBindingORM:
+        """创建微信绑定"""
+        async with self._async_sessionmaker() as session:
+            binding = WeChatBindingORM(
+                wechat_user_id=wechat_user_id,
+                student_id=student_id,
+                role=role,
+            )
+            session.add(binding)
+            await session.commit()
+            await session.refresh(binding)
+            return binding
+
+    async def get_wechat_binding(
+        self,
+        wechat_user_id: str,
+        role: str = "student",
+    ) -> WeChatBindingORM | None:
+        """获取微信绑定"""
+        async with self._async_sessionmaker() as session:
+            result = await session.execute(
+                select(WeChatBindingORM).where(
+                    WeChatBindingORM.wechat_user_id == wechat_user_id,
+                    WeChatBindingORM.role == role,
+                )
+            )
+            return result.scalar_one_or_none()
+
+    async def update_wechat_binding(
+        self,
+        wechat_user_id: str,
+        student_id: str,
+        role: str = "student",
+    ) -> WeChatBindingORM | None:
+        """更新微信绑定"""
+        async with self._async_sessionmaker() as session:
+            result = await session.execute(
+                select(WeChatBindingORM).where(
+                    WeChatBindingORM.wechat_user_id == wechat_user_id,
+                    WeChatBindingORM.role == role,
+                )
+            )
+            binding = result.scalar_one_or_none()
+            if binding:
+                binding.student_id = student_id
+                binding.created_at = datetime.now()
+                await session.commit()
+                await session.refresh(binding)
+            return binding
+
+    async def delete_wechat_binding(
+        self,
+        wechat_user_id: str,
+        role: str = "student",
+    ) -> bool:
+        """删除微信绑定"""
+        async with self._async_sessionmaker() as session:
+            result = await session.execute(
+                select(WeChatBindingORM).where(
+                    WeChatBindingORM.wechat_user_id == wechat_user_id,
+                    WeChatBindingORM.role == role,
+                )
+            )
+            binding = result.scalar_one_or_none()
+            if binding:
+                await session.delete(binding)
+                await session.commit()
+                return True
+            return False
+
+    async def get_wechat_binding_by_student(
+        self,
+        student_id: str,
+        role: str = "student",
+    ) -> WeChatBindingORM | None:
+        """根据学生ID获取微信绑定"""
+        async with self._async_sessionmaker() as session:
+            result = await session.execute(
+                select(WeChatBindingORM).where(
+                    WeChatBindingORM.student_id == student_id,
+                    WeChatBindingORM.role == role,
+                )
+            )
+            return result.scalar_one_or_none()
 
 
 # 默认存储实例

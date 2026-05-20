@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from src.agent.tutor import get_tutor_agent
-from src.web.api import router as api_router
+from src.web.api import router as api_router, wechat_router
 from src.web.ws import router as ws_router
 
 # 配置日志
@@ -52,6 +52,7 @@ def create_app() -> FastAPI:
     # 注册路由
     app.include_router(api_router)
     app.include_router(ws_router)
+    app.include_router(wechat_router)
 
     # 静态文件服务
     static_dir = Path(__file__).parent / "static"
