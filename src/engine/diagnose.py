@@ -8,6 +8,8 @@ from openai import AsyncOpenAI
 
 from src.config.settings import get_config
 from src.knowledge.graph import KnowledgeGraph
+from src.knowledge.loader import get_point
+from src.knowledge.service import get_knowledge_service
 
 
 @dataclass
@@ -48,6 +50,7 @@ class DiagnoseEngine:
         self.config = get_config()
         self.client: AsyncOpenAI | None = None
         self._graph = KnowledgeGraph()
+        self._knowledge_service = get_knowledge_service()
         self._prompt_template = self._load_prompt_template()
 
     def _load_prompt_template(self) -> str:
@@ -175,7 +178,7 @@ class DiagnoseEngine:
         for weak in weak_points:
             prerequisites = self._graph.get_prerequisites_recursive(weak.point_id)
             for prereq in prerequisites:
-                if prereq.id not in mastered_points and prereq.id not in visited:
+                if prereq.id not in mastered_points:
                     visited.add(prereq.id)
                     path.insert(0, prereq.id)
 

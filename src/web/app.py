@@ -13,6 +13,7 @@ from src.config.settings import get_config
 from src.web.api import router as api_router, wechat_router
 from src.web.health import router as health_router
 from src.web.ws import router as ws_router
+from src.knowledge.api import router as knowledge_router
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -58,6 +59,7 @@ def create_app() -> FastAPI:
     app.include_router(api_router)
     app.include_router(ws_router)
     app.include_router(wechat_router)
+    app.include_router(knowledge_router)
 
     # 静态文件服务
     static_dir = Path(__file__).parent / "static"

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from openai import AsyncOpenAI
 
 from src.config.settings import get_config
+from src.knowledge.service import get_knowledge_service
 
 
 @dataclass
@@ -23,6 +24,7 @@ class ExplainEngine:
         """初始化讲解引擎"""
         self.config = get_config()
         self.client: AsyncOpenAI | None = None
+        self._knowledge_service = get_knowledge_service()
 
     async def explain(
         self,
@@ -30,16 +32,43 @@ class ExplainEngine:
         knowledge_desc: str,
         student_question: str = "",
         grade: int = 3,
+        knowledge_id: str | None = None,
     ) -> Explanation:
-        """生成讲解内容"""
+        """生成讲解内容
+
+        Args:
+            knowledge_name: 知识点名称
+            knowledge_desc: 知识点描述
+            student_question: 学生问题
+            grade: 年级
+            knowledge_id: 知识点ID（用于获取数据库中的详细信息）
+        """
         if self.client is None:
             self.client = self.config.get_client(async_client=True)
 
+        # 从知识库获取详细信息
+        definition = knowledge_desc
+        examples = []
+        common_mistakes = []
+        tips = ""
+
+        if knowledge_id:
+            detail = self._knowledge_service.get_knowledge_detail(knowledge_id)
+            if detail:
+                if detail.definition:
+                    definition = detail.definition
+                examples = detail.examples
+                common_mistakes = detail.common_mistakes
+                if detail.summary:
+                    tips = detail.summary
+
         prompt = self._build_explain_prompt(
             knowledge_name,
-            knowledge_desc,
+            definition,
             student_question,
             grade,
+            examples,
+            common_mistakes,
         )
 
         response = await self.client.chat.completions.create(
@@ -54,13 +83,14 @@ class ExplainEngine:
 4. 用亲切、鼓励的语气
 5. 适度使用emoji，增加趣味性
 6. 孩子听不懂就换一种方式解释
+7. 提醒孩子注意常见错误，避免掉坑
 
 请用JSON格式返回讲解内容：
 {{
     "summary": "一句话总结（不超过50字）",
     "detail": "详细讲解内容",
     "examples": ["例题1", "例题2"],
-    "tips": "记忆小技巧"
+    "tips": "记忆小技巧或注意事项"
 }}
 """,
                 },
@@ -71,7 +101,13 @@ class ExplainEngine:
         )
 
         content = response.choices[0].message.content
-        return self._parse_explanation(content, knowledge_name)
+        explanation = self._parse_explanation(content, knowledge_name)
+
+        # 如果解析出的tips为空，使用知识库的tips
+        if not explanation.tips and tips:
+            explanation.tips = tips
+
+        return explanation
 
     async def explain_quiz(
         self,
@@ -127,12 +163,20 @@ class ExplainEngine:
         knowledge_desc: str,
         student_question: str,
         grade: int,
+        examples: list[str] | None = None,
+        common_mistakes: list[str] | None = None,
     ) -> str:
         """构建讲解prompt"""
         parts = [
             f"知识点：{knowledge_name}",
             f"知识点描述：{knowledge_desc}",
         ]
+
+        if examples:
+            parts.append(f"示例：{'; '.join(examples[:3])}")
+
+        if common_mistakes:
+            parts.append(f"常见错误（提醒孩子注意）：{'; '.join(common_mistakes[:2])}")
 
         if student_question:
             parts.append(f"学生问题：{student_question}")

@@ -5,6 +5,8 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from src.knowledge.graph import KnowledgeGraph, get_graph
+from src.knowledge.loader import get_point, get_points_by_grade
+from src.knowledge.service import get_knowledge_service
 
 
 @dataclass
@@ -23,6 +25,7 @@ class LearningPlanner:
     def __init__(self, graph: KnowledgeGraph | None = None):
         """初始化学习路径规划器"""
         self._graph = graph or get_graph()
+        self._knowledge_service = get_knowledge_service()
 
     def generate_study_plan(
         self,
@@ -109,14 +112,20 @@ class LearningPlanner:
         fuzzy_ids: set[str],
     ) -> StudyPlan:
         """创建复习计划"""
-        # 按难度排序，先复习简单知识点
-        review_points = sorted(
-            point_ids,
-            key=lambda pid: self._graph.get_point(pid).difficulty.value
-            if self._graph.get_point(pid) else 3,
-        )
+        def get_difficulty(pid: str) -> int:
+            point = self._graph.get_point(pid)
+            if not point:
+                return 3
+            if hasattr(point.difficulty, 'value'):
+                return point.difficulty.value
+            if isinstance(point.difficulty, int):
+                return point.difficulty
+            return 3
 
-        current_focus = review_points[0]
+        # 按难度排序，先复习简单知识点
+        review_points = sorted(point_ids, key=get_difficulty)
+
+        current_focus = review_points[0] if review_points else "unknown"
 
         return StudyPlan(
             current_focus=current_focus,
@@ -173,23 +182,24 @@ class LearningPlanner:
         mastered_ids: set[str],
     ) -> Any | None:
         """找出下一个可以学习的新知识点"""
-        grade_points = self._graph.get_points_by_grade(grade)
+        # 使用知识库服务获取可学习的知识点
+        learnable_details = self._knowledge_service.get_next_learnable_points(grade, mastered_ids)
 
-        # 按难度和依赖关系排序
-        candidates: list[Any] = []
-        for point in grade_points:
-            if point.id in mastered_ids:
-                continue
+        if not learnable_details:
+            return None
 
-            # 检查前置知识是否都已掌握
-            prereqs = self._graph.get_prerequisites_recursive(point.id)
-            prereq_ids = {p.id for p in prereqs}
-            if prereq_ids.issubset(mastered_ids):
-                candidates.append(point)
+        # 优先选择重要性较高的（了解 < 理解 < 掌握 < 精通）
+        importance_order = {"了解": 1, "理解": 2, "掌握": 3, "精通": 4}
+        learnable_details.sort(
+            key=lambda d: (
+                importance_order.get(d.importance, 2),
+                d.difficulty,
+            )
+        )
 
-        # 优先选择难度较低的
-        candidates.sort(key=lambda p: p.difficulty.value)
-        return candidates[0] if candidates else None
+        # 转换为 KnowledgePoint
+        first_id = learnable_details[0].id
+        return self._graph.get_point(first_id)
 
     def _build_learning_path(
         self,
@@ -206,7 +216,14 @@ class LearningPlanner:
         if not point:
             return 3
 
-        # 根据难度估算
+        # 根据难度估算（处理 difficulty 是枚举或整数的情况）
+        if hasattr(point.difficulty, 'value'):
+            diff_value = point.difficulty.value
+        elif isinstance(point.difficulty, int):
+            diff_value = point.difficulty
+        else:
+            diff_value = 3
+
         difficulty_multiplier = {
             1: 2,  # 简单：2次
             2: 3,  # 中等：3次
@@ -214,7 +231,7 @@ class LearningPlanner:
             4: 7,  # 很困难：7次
             5: 10,  # 专家级：10次
         }
-        return difficulty_multiplier.get(point.difficulty.value, 3)
+        return difficulty_multiplier.get(diff_value, 3)
 
     def _get_forgetting_review_points(
         self,

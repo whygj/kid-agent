@@ -8,7 +8,8 @@ from typing import Any
 from openai import AsyncOpenAI
 
 from src.config.settings import get_config
-from src.knowledge.math_g3g5 import KnowledgePoint
+from src.knowledge.loader import KnowledgePoint, get_points_by_grade
+from src.knowledge.service import get_knowledge_service
 
 
 @dataclass
@@ -37,6 +38,7 @@ class QuizEngine:
         self.config = get_config()
         self.client: AsyncOpenAI | None = None
         self._prompt_template = self._load_prompt_template()
+        self._knowledge_service = get_knowledge_service()
 
     def _load_prompt_template(self) -> str:
         """加载出题prompt模板"""
@@ -74,17 +76,70 @@ class QuizEngine:
         knowledge_point: KnowledgePoint,
         difficulty: int | None = None,
         student_history: list[Any] | None = None,
+        use_common_mistakes: bool = True,
     ) -> Quiz:
-        """生成题目"""
-        if difficulty is None:
-            difficulty = knowledge_point.difficulty.value
+        """生成题目
 
-        # 准备prompt
-        prompt = self._prompt_template.replace('{name}', knowledge_point.name).replace('{grade}', str(knowledge_point.grade)).replace('{difficulty}', str(difficulty)).replace('{description}', knowledge_point.description)
+        Args:
+            knowledge_point: 知识点对象
+            difficulty: 难度等级，默认使用知识点的难度
+            student_history: 学生历史记录
+            use_common_mistakes: 是否使用常见错误生成干扰项
+        """
+        if difficulty is None:
+            difficulty = knowledge_point.difficulty.value if hasattr(knowledge_point.difficulty, 'value') else int(knowledge_point.difficulty)
+
+        # 从知识库获取详细信息
+        description = knowledge_point.description or ""
+        definition = getattr(knowledge_point, 'definition', '') or description
+        examples = getattr(knowledge_point, 'examples', []) or []
+
+        # 获取常见错误（用于生成干扰项）
+        common_mistakes = []
+        if use_common_mistakes:
+            common_mistakes = self._knowledge_service.get_common_mistakes(knowledge_point.id)
+
+        # 构建prompt
+        prompt_parts = [
+            f"知识点：{knowledge_point.name}",
+            f"年级：{knowledge_point.grade}",
+            f"难度：{difficulty}（1-5级，1最简单）",
+            f"描述：{description}",
+        ]
+
+        if definition and definition != description:
+            prompt_parts.append(f"定义：{definition}")
+
+        if examples:
+            prompt_parts.append(f"示例：{'; '.join(examples[:2])}")
+
+        if common_mistakes:
+            prompt_parts.append(f"常见错误：{'; '.join(common_mistakes[:3])}")
+
+        prompt = "\n".join(prompt_parts) + """
+
+要求：
+1. 题目类型可以是：填空题、选择题、计算题、应用题
+2. 题目要有趣味性，贴近生活
+3. 难度要符合要求
+4. 如果是选择题，提供4个选项，其中可以参考常见错误设置干扰项
+5. 不要直接给答案，只输出题目
+
+请用JSON格式返回：
+{{
+    "question_type": "free/choice/calculation",
+    "question": "题目内容",
+    "options": ["选项A", "选项B", "选项C", "选项D"]（选择题才需要），
+    "answer": "标准答案",
+    "explanation": "答案解释"
+}}
+"""
 
         # 添加历史参考
         if student_history:
-            prompt += f"\n\n学生最近做过：{len(student_history)}道题，正确率{sum(1 for h in student_history if h.get('is_correct')) / len(student_history):.1%}"
+            correct_count = sum(1 for h in student_history if h.get('is_correct'))
+            accuracy = correct_count / len(student_history) if student_history else 0
+            prompt += f"\n\n学生最近做过：{len(student_history)}道题，正确率{accuracy:.1%}"
 
         # 调用LLM
         if self.client is None:

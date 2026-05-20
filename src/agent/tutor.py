@@ -389,10 +389,11 @@ class TutorAgent:
         )
 
         # 持久化掌握程度
-        new_level = MasteryLevel.UNKNOWN
         if result.is_correct:
-            new_level = MasteryLevel.EXPOSING
+            # 答对：提升到模糊掌握
+            new_level = MasteryLevel.FUZZY
         else:
+            # 答错：保持暴露中
             new_level = MasteryLevel.EXPOSING
         await self._store.save_mastery(student_id, point_id, new_level.value)
 
@@ -421,10 +422,6 @@ class TutorAgent:
         # 更新学生XP
         old_xp = student.total_xp
         xp_gain = 10 if result.is_correct else 3
-        if result.is_correct:
-            student.total_xp += xp_gain
-        else:
-            student.total_xp += xp_gain
         await self._store.update_student_xp(student_id, xp_gain)
 
         # 检查升级
