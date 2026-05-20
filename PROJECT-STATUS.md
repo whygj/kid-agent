@@ -3,13 +3,14 @@
 
 ## 项目位置
 - 笔记本Linux: ~/projects/kid-agent/ (主仓库，通过Tailscale SSH访问)
-- 服务器本地: /home/ubuntu/projects/kid-agent-local/ (工作副本)
+- 服务器本地: /home/ubuntu/projects/kid-agent/ (工作副本)
 - Win11: D:/projects/kid-agent/
 
 ## 当前代码状态
-- Phase 5已完成: Docker+Systemd+Nginx部署全部就绪 (commit cde1d5d)
+- Phase 5已完成: Docker+Systemd+Nginx部署全部就绪
 - 知识库完整集成: 304个数学知识点（1-9年级），已接入主教学流程
-- 测试: 280/277通过，5跳过 (集成测试需要API密钥)
+- 最新提交: 知识库增强 - 视频引擎+FTS修复+向量嵌入+多学科支持 (commit 17100ee)
+- 测试: 270/274通过，4跳过 (集成测试需要API密钥)
 
 ## 知识库实现完成 (2026-05-20)
 - 数据库schema: src/knowledge/schema.sql (7节点9边模型)
@@ -26,6 +27,7 @@
 - 常见错误: 840条
 - 教材: 11本 (1-9年级)
 - 学科: 3个 (数学/语文/英语)
+- 习题: 0个 (待生成)
 
 ### 知识点分布
 | 年级 | 知识点数 |
@@ -64,11 +66,48 @@
 7. 知识点详情完整性
 8. 搜索功能
 
-## 下一步要做的事
-1. 扩展习题库（当前0个习题）
-2. 修复全文搜索（FTS表同步问题）
-3. 添加向量嵌入支持（用于语义检索）
-4. 实现多学科支持
+## 最新完成功能 (2026-05-20)
+
+### 视频生成引擎
+- `src/engine/video/` - 数学概念讲解视频生成（Manim+TTS）
+  - models.py: 视频任务、配置、状态模型
+  - selector.py: 智能选择视频框架
+  - math_video.py: 数学可视化视频生成
+
+### 全文搜索修复
+- 重建FTS表支持自动同步（触发器）
+- 修复ConceptCRUD.search查询
+- `scripts/rebuild_fts.py`: FTS表重建脚本
+- `scripts/sync_fts.py`: FTS索引同步脚本
+
+### 向量嵌入支持
+- `src/knowledge/semantic_search.py`: 语义搜索服务
+  - cosine_similarity计算
+  - EmbeddingClient: GLM嵌入API客户端
+  - SemanticSearch: 向量检索服务
+  - search_hybrid: 混合搜索（全文+语义）
+- `scripts/generate_embeddings.py`: 生成嵌入向量脚本
+
+### 多学科支持
+- `src/knowledge/multisubject.py`: 跨学科知识点管理
+  - Subject枚举和SubjectInfo
+  - MultiSubjectService: 多学科服务
+  - 跨学科搜索和推荐
+  - 跨年级进度追踪
+
+### 习题数据生成
+- `scripts/generate_exercises.py`: AI生成习题脚本
+- 支持选择题、填空题、计算题、应用题
+- 自动关联知识点
+
+### 真实LLM教学闭环测试
+- `tests/test_real_teaching.py`: 集成测试
+- 验证完整教学流程（出题-判题-讲解）
+
+## 待办事项
+- [ ] 运行习题生成脚本（需要API密钥）
+- [ ] 运行嵌入向量生成脚本（需要API密钥）
+- [ ] 添加更多学科的知识点数据
 
 ## 参考资源
 - K12-KGraph (北大): github.com/haolpku/K12-Dataset
