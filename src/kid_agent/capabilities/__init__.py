@@ -1,5 +1,8 @@
-"""Kid Agent Capabilities — DeepTutor BaseCapability implementations."""
+"""
+Capabilities Package
+====================
 
-from .tutor import KidTutorCapability
-
-__all__ = ["KidTutorCapability"]
+Each module wraps an existing agent pipeline behind the ``BaseCapability`` protocol.
+Capabilities represent deep modes: multi-step agent pipelines that take over
+the conversation when selected by the user.
+"""

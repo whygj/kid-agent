@@ -1,48 +1,28 @@
-"""Knowledge module — manages the K-12 knowledge database."""
+#!/usr/bin/env python
+"""Knowledge base package exports (lazy-loaded)."""
 
-from pathlib import Path
-import os
-import sqlite3
+from __future__ import annotations
 
-_KB_DIR = Path(os.environ.get(
-    "KID_KB_DIR",
-    str(Path(__file__).resolve().parent.parent.parent.parent / "data"),
-))
-_KB_PATH = _KB_DIR / "knowledge.db"
+from typing import Any
 
-
-def get_kb_path() -> Path:
-    """Return the path to the knowledge database."""
-    return _KB_PATH
+__all__ = [
+    "DocumentAdder",
+    "KnowledgeBaseInitializer",
+    "KnowledgeBaseManager",
+]
 
 
-def get_kb_conn() -> sqlite3.Connection:
-    """Get a connection to the knowledge database."""
-    if not _KB_PATH.exists():
-        raise FileNotFoundError(f"Knowledge database not found: {_KB_PATH}")
-    conn = sqlite3.connect(str(_KB_PATH))
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    return conn
+def __getattr__(name: str) -> Any:
+    if name == "DocumentAdder":
+        from .add_documents import DocumentAdder
 
+        return DocumentAdder
+    if name == "KnowledgeBaseInitializer":
+        from .initializer import KnowledgeBaseInitializer
 
-def get_kb_stats() -> dict:
-    """Return statistics about the knowledge base."""
-    conn = get_kb_conn()
-    try:
-        concepts = conn.execute("SELECT COUNT(*) FROM concepts").fetchone()[0]
-        relations = conn.execute("SELECT COUNT(*) FROM relation_prerequisite").fetchone()[0]
-        mistakes = conn.execute("SELECT COUNT(*) FROM common_mistakes").fetchone()[0]
-        books = conn.execute("SELECT COUNT(*) FROM books").fetchone()[0]
-        return {
-            "concepts": concepts,
-            "relations": relations,
-            "mistakes": mistakes,
-            "books": books,
-            "path": str(_KB_PATH),
-        }
-    finally:
-        conn.close()
+        return KnowledgeBaseInitializer
+    if name == "KnowledgeBaseManager":
+        from .manager import KnowledgeBaseManager
 
-
-__all__ = ["get_kb_path", "get_kb_conn", "get_kb_stats"]
+        return KnowledgeBaseManager
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
