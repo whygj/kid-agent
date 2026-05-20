@@ -1,0 +1,46 @@
+version: "3.8"
+
+services:
+  kid-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: kid-agent
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      # SQLite database persistence
+      - ./data:/app/data
+      # Configuration directory (must contain .env file)
+      - ./config:/app/config
+    environment:
+      # Override environment from host's .env file
+      - LLM_PROVIDER=${LLM_PROVIDER:-glm}
+      - GLM_API_KEY=${GLM_API_KEY}
+      - GLM_API_BASE=${GLM_API_BASE:-https://open.bigmodel.cn/api/paas/v4}
+      - GLM_MODEL=${GLM_MODEL:-glm-4}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - DEEPSEEK_API_BASE=${DEEPSEEK_API_BASE:-https://api.deepseek.com/v1}
+      - DEEPSEEK_MODEL=${DEEPSEEK_MODEL:-deepseek-chat}
+      - DB_PATH=/app/data/kid_agent.db
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - TTS_PROVIDER=${TTS_PROVIDER:-edge}
+      - TTS_VOICE=${TTS_VOICE:-zh-CN-XiaoxiaoNeural}
+      - TTS_AUTO_PLAY=${TTS_AUTO_PLAY:-true}
+      - WECHAT_APP_ID=${WECHAT_APP_ID}
+      - WECHAT_APP_SECRET=${WECHAT_APP_SECRET}
+      - WECHAT_TOKEN=${WECHAT_TOKEN:-kidagent2024}
+      - WECHAT_ENCODING_AES_KEY=${WECHAT_ENCODING_AES_KEY}
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+    networks:
+      - kid-agent-network
+
+networks:
+  kid-agent-network:
+    driver: bridge

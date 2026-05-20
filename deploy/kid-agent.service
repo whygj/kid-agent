@@ -1,0 +1,37 @@
+[Unit]
+Description=Kid Agent - AI Math Tutor for Kids
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=kidagent
+Group=kidagent
+WorkingDirectory=/opt/kid-agent
+Environment="PYTHONPATH=/opt/kid-agent"
+EnvironmentFile=/opt/kid-agent/config/.env
+ExecStart=/opt/kid-agent/.venv/bin/python3 -m src.main --mode web --port 8000 --host 127.0.0.1
+
+# Restart policy
+Restart=always
+RestartSec=5
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=kid-agent
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/kid-agent/data
+
+# Resource limits
+LimitNOFILE=65536
+TimeoutStartSec=30
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

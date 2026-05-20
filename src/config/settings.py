@@ -2,10 +2,10 @@
 
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 from dotenv import load_dotenv
 from openai import AsyncOpenAI, OpenAI
@@ -13,6 +13,12 @@ from openai import AsyncOpenAI, OpenAI
 from src.utils.errors import ConfigError, check_api_key
 
 logger = logging.getLogger(__name__)
+
+
+class Environment(Enum):
+    """运行环境"""
+    DEVELOPMENT = "development"
+    PRODUCTION = "production"
 
 
 class Provider(Enum):
@@ -55,13 +61,24 @@ class WeChatConfig:
 
 
 @dataclass
+class CORSConfig:
+    """CORS配置"""
+    allow_origins: List[str] = field(default_factory=lambda: ["*"])
+    allow_credentials: bool = True
+    allow_methods: List[str] = field(default_factory=lambda: ["*"])
+    allow_headers: List[str] = field(default_factory=lambda: ["*"])
+
+
+@dataclass
 class Config:
     """全局配置"""
     llm: LLMConfig
     db: DBConfig
     voice: VoiceConfig
     wechat: WeChatConfig
+    cors: CORSConfig = field(default_factory=CORSConfig)
     log_level: str = "INFO"
+    environment: Environment = Environment.DEVELOPMENT
 
     @classmethod
     def load(cls, validate: bool = True) -> "Config":
@@ -81,6 +98,14 @@ class Config:
         env_path = Path(__file__).parent.parent.parent / "config" / ".env"
         if env_path.exists():
             load_dotenv(env_path)
+
+        # 确定运行环境
+        env_name = os.getenv("ENVIRONMENT", "development").lower()
+        try:
+            environment = Environment(env_name)
+        except ValueError:
+            logger.warning(f"Unknown environment '{env_name}', defaulting to development")
+            environment = Environment.DEVELOPMENT
 
         # 默认使用GLM，如果失败则使用DeepSeek
         provider_name = os.getenv("LLM_PROVIDER", "glm").lower()
@@ -124,12 +149,30 @@ class Config:
             encoding_aes_key=os.getenv("WECHAT_ENCODING_AES_KEY", ""),
         )
 
+        # CORS配置 - 生产环境限制域名
+        if environment == Environment.PRODUCTION:
+            cors_origins = os.getenv("CORS_ORIGINS", "").split(",")
+            cors_origins = [origin.strip() for origin in cors_origins if origin.strip()]
+            if not cors_origins:
+                cors_origins = ["*"]
+        else:
+            cors_origins = ["*"]
+
+        cors_config = CORSConfig(
+            allow_origins=cors_origins,
+            allow_credentials=True,
+            allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+            allow_headers=["*"],
+        )
+
         config = cls(
             llm=llm_config,
             db=db_config,
             voice=voice_config,
             wechat=wechat_config,
+            cors=cors_config,
             log_level=os.getenv("LOG_LEVEL", "INFO"),
+            environment=environment,
         )
 
         if validate:
@@ -238,4 +281,24 @@ def reload_config() -> Config:
     Returns:
         Config: 配置对象
     """
+    return get_config(reload=True, validate=True)
+
+
+def get_production_config() -> Config:
+    """获取生产环境配置（便捷方法）
+
+    Returns:
+        Config: 生产环境配置对象
+    """
+    os.environ["ENVIRONMENT"] = "production"
+    return get_config(reload=True, validate=True)
+
+
+def get_development_config() -> Config:
+    """获取开发环境配置（便捷方法）
+
+    Returns:
+        Config: 开发环境配置对象
+    """
+    os.environ["ENVIRONMENT"] = "development"
     return get_config(reload=True, validate=True)

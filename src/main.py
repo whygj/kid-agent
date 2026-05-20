@@ -72,7 +72,7 @@ async def cli_mode(student_id: str):
             console.print('输入"exit"退出，或者继续对话~')
 
 
-async def web_mode(port: int):
+async def web_mode(port: int, host: str = "0.0.0.0"):
     """Web模式运行（Phase 2）"""
     import uvicorn
 
@@ -86,12 +86,15 @@ async def web_mode(port: int):
     from src.web.app import app
 
     console.print(f"\n🚀 服务器启动中... 端口: [bold green]{port}[/bold green]")
-    console.print(f"🌐 访问地址: [bold cyan]http://localhost:{port}[/bold cyan]")
+    if host == "0.0.0.0":
+        console.print(f"🌐 访问地址: [bold cyan]http://localhost:{port}[/bold cyan]")
+    else:
+        console.print(f"🌐 访问地址: [bold cyan]http://{host}:{port}[/bold cyan]")
     console.print("\n按 Ctrl+C 停止服务器\n")
 
     config = uvicorn.Config(
         app,
-        host="0.0.0.0",
+        host=host,
         port=port,
         log_level="info",
     )
@@ -175,6 +178,13 @@ def main():
     )
 
     parser.add_argument(
+        "--host",
+        type=str,
+        default="0.0.0.0",
+        help="Web/API服务绑定地址 (默认: 0.0.0.0)",
+    )
+
+    parser.add_argument(
         "--student",
         type=str,
         default="default_student",
@@ -207,9 +217,7 @@ def main():
     elif args.mode == "cli":
         asyncio.run(cli_mode(args.student))
     elif args.mode == "web":
-        asyncio.run(web_mode(args.port))
-    else:
-        asyncio.run(api_mode())
+        asyncio.run(web_mode(args.port, args.host))
 
 
 if __name__ == "__main__":
