@@ -382,7 +382,7 @@ class ConceptCRUD:
 
         cursor.execute(
             """SELECT c.* FROM concepts c
-               JOIN concepts_fts f ON c.id = f.concept_id
+               JOIN concepts_fts f ON c.rowid = f.rowid
                WHERE concepts_fts MATCH ?
                ORDER BY c.importance DESC
                LIMIT ?""",

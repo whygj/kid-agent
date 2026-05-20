@@ -143,9 +143,8 @@ CREATE TABLE IF NOT EXISTS concept_embeddings (
     updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- 全文检索索引
+-- 全文检索索引（使用外部内容表模式自动同步）
 CREATE VIRTUAL TABLE IF NOT EXISTS concepts_fts USING fts5(
-    concept_id,
     name,
     definition,
     summary,
